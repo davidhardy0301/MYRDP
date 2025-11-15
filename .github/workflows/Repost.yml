@@ -22,11 +22,9 @@ jobs:
                              -Name "UserAuthentication" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
                              -Name "SecurityLayer" -Value 0 -Force
-
           # Open firewall for RDP on port 3389
           netsh advfirewall firewall add rule name="RDP-Tailscale" `
             dir=in action=allow protocol=TCP localport=3389
-
           # Restart the Remote Desktop service to ensure changes take effect
           Restart-Service -Name TermService -Force
 
@@ -35,7 +33,6 @@ jobs:
           # Use a fixed RDP password as requested
           $password = 'Zain.rty123'
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
-
           # Create the RDP user (if it already exists, update the password)
           if (Get-LocalUser -Name "Administrator" -ErrorAction SilentlyContinue) {
               # Set the password for existing user
@@ -43,7 +40,6 @@ jobs:
           } else {
               New-LocalUser -Name "Administrator" -Password $securePass -AccountNeverExpires
           }
-
           # Ensure group memberships
           if (-not (Get-LocalGroupMember -Group "Administrators" -Member "Administrator" -ErrorAction SilentlyContinue)) {
               Add-LocalGroupMember -Group "Administrators" -Member "Administrator"
@@ -51,14 +47,101 @@ jobs:
           if (-not (Get-LocalGroupMember -Group "Remote Desktop Users" -Member "Administrator" -ErrorAction SilentlyContinue)) {
               Add-LocalGroupMember -Group "Remote Desktop Users" -Member "Administrator"
           }
-
           # Output the credentials to GitHub environment for later use
           echo "RDP_CREDS=User: Administrator | Password: $password" >> $env:GITHUB_ENV
-
           if (-not (Get-LocalUser -Name "Administrator")) {
               Write-Error "User creation or update failed"
               exit 1
           }
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install Private Internet Access (PIA) VPN
+        env:
+          PIA_USERNAME: ${{ secrets.PIA_USERNAME }}
+          PIA_PASSWORD: ${{ secrets.PIA_PASSWORD }}
+        run: |
+          $url = "https://installers.privateinternetaccess.com/download/pia-windows-x64-3.7-08412.exe"
+          $installer = "$env:TEMP\pia-installer.exe"
+
+          Write-Host "Downloading PIA installer..."
+          Invoke-WebRequest -Uri $url -OutFile $installer
+
+          Write-Host "Running PIA installer (silent)..."
+          Start-Process -FilePath $installer -ArgumentList '/S' -Wait
+
+          Remove-Item $installer -Force -ErrorAction SilentlyContinue
+
+          $piaCtl = "C:\Program Files\Private Internet Access\piactl.exe"
+          if (-not (Test-Path $piaCtl)) {
+            $piaCtl = "C:\Program Files (x86)\Private Internet Access\piactl.exe"
+          }
+          if (-not (Test-Path $piaCtl)) {
+            Write-Error "piactl not found after install"
+            exit 1
+          }
+
+          Write-Host "Logging in to PIA (credentials provided via secrets)..."
+          & $piaCtl login -u $env:PIA_USERNAME -p $env:PIA_PASSWORD
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "PIA login failed"
+            exit 1
+          }
+
+          Write-Host "Connecting PIA..."
+          & $piaCtl connect
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "PIA connect failed"
+            exit 1
+          }
+
+          Write-Host "PIA installed and connected."
+
+      - name: Install VS Code Desktop
+        run: |
+          $vscodeUrl = "https://update.code.visualstudio.com/latest/win32-x64-user/stable"
+          $installerPath = "$env:TEMP\vscode-installer.exe"
+
+          # Download VS Code installer
+          Invoke-WebRequest -Uri $vscodeUrl -OutFile $installerPath
+
+          # Install VS Code silently (user installer)
+          Start-Process -FilePath $installerPath -ArgumentList '/VERYSILENT','/MERGETASKS=!runcode' -Wait
+
+          # Clean up installer
+          Remove-Item $installerPath -Force
+
+          Write-Host "VS Code installed successfully."
+
+      - name: Download and Extract Fiverr_bot
+        run: |
+          # Paths
+          $downloadUrl = "https://github.com/Zaiinalii/asdgfasegdfbv/releases/download/v1/fiverr_bot.rar"
+          $downloadPath = "$env:TEMP\fiverr_bot.rar"
+          $extractPath = "$env:TEMP\fiverr_bot_extracted"
+          $desktopPath = "$env:USERPROFILE\Desktop"
+
+          # Download the RAR file
+          Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath
+
+          # Install 7-Zip if not installed
+          if (-not (Test-Path "C:\Program Files\7-Zip\7z.exe")) {
+              choco install 7zip -y
+          }
+
+          # Ensure extraction folder exists
+          New-Item -ItemType Directory -Path $extractPath -Force | Out-Null
+
+          # Extract the RAR
+          & "C:\Program Files\7-Zip\7z.exe" x $downloadPath "-o$extractPath" -y
+
+          # Copy extracted files to Desktop
+          Copy-Item "$extractPath\*" $desktopPath -Recurse -Force
+
+          Write-Host "Fiverr_bot downloaded, extracted, and copied to Desktop."
 
       - name: Install Tailscale
         run: |
@@ -73,31 +156,27 @@ jobs:
         run: |
           # Get the Tailscale Auth Key from GitHub Secrets
           $authKey = "${{ secrets.TAILSCALE_AUTH_KEY }}"
-          
+
           # Log in to Tailscale using the provided auth key and set a unique hostname
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=$authKey --hostname=gh-runner-$env:GITHUB_RUN_ID
-
           # Wait for Tailscale to assign an IP
           $tsIP = $null
           $retries = 0
-
           while (-not $tsIP -and $retries -lt 10) {
               $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
               Start-Sleep -Seconds 5
               $retries++
           }
-
           if (-not $tsIP) {
               Write-Error "Tailscale IP not assigned. Exiting."
               exit 1
           }
-
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
       - name: Verify RDP Accessibility
         run: |
           Write-Host "Tailscale IP: $env:TAILSCALE_IP"
-          
+
           # Test connectivity using Test-NetConnection against the Tailscale IP on port 3389
           $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
           if (-not $testResult.TcpTestSucceeded) {
@@ -113,7 +192,6 @@ jobs:
           Write-Host "Username: Administrator"
           Write-Host "Password: $(echo $env:RDP_CREDS)"
           Write-Host "==================`n"
-
           # Keep runner active indefinitely (or until manually canceled)
           while ($true) {
               Write-Host "[$(Get-Date)] RDP Active - Use Ctrl+C to terminate"
