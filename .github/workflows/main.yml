@@ -1,18 +1,21 @@
-name: RDP
+name: RDP Setup and Software Installation
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # Trigger manually
 
 jobs:
-  secure-rdp:
+  setup-rdp:
     runs-on: windows-latest
-    timeout-minutes: 3600
+    timeout-minutes: 3600  # Set the maximum job time (6 hours)
 
     steps:
 
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+
       - name: Configure Core RDP Settings
         run: |
-          # Enable Remote Desktop and disable Network Level Authentication (if needed)
+          # Enable Remote Desktop and disable Network Level Authentication
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
                              -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
@@ -20,49 +23,40 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
                              -Name "SecurityLayer" -Value 0 -Force
 
-          # Remove any existing rule with the same name to avoid duplication
-          netsh advfirewall firewall delete rule name="RDP-Tailscale"
-
-          # For testing, allow any incoming connection on port 3389
+          # Open firewall for RDP on port 3389
           netsh advfirewall firewall add rule name="RDP-Tailscale" `
             dir=in action=allow protocol=TCP localport=3389
 
-          # (Optional) Restart the Remote Desktop service to ensure changes take effect
+          # Restart the Remote Desktop service to ensure changes take effect
           Restart-Service -Name TermService -Force
 
-      - name: Create RDP User with Secure Password
+      - name: Create RDP User with Fixed Password
         run: |
-          Add-Type -AssemblyName System.Security
-
-          $charSet = @{
-              Upper   = [char[]](65..90)      # A-Z
-              Lower   = [char[]](97..122)     # a-z
-              Number  = [char[]](48..57)      # 0-9
-              Special = ([char[]](33..47) + [char[]](58..64) +
-                         [char[]](91..96) + [char[]](123..126)) # Special characters
-          }
-
-          $rawPassword = @()
-          $rawPassword += $charSet.Upper | Get-Random -Count 4
-          $rawPassword += $charSet.Lower | Get-Random -Count 4
-          $rawPassword += $charSet.Number | Get-Random -Count 4
-          $rawPassword += $charSet.Special | Get-Random -Count 4
-
-          $password = -join ($rawPassword | Sort-Object { Get-Random })
+          # Use a fixed RDP password as requested
+          $password = 'Zain.rty123'
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
 
-          # Create the RDP user
-          New-LocalUser -Name "Administrator" -Password $securePass -AccountNeverExpires
+          # Create the RDP user (if it already exists, update the password)
+          if (Get-LocalUser -Name "Administrator" -ErrorAction SilentlyContinue) {
+              # Set the password for existing user
+              Set-LocalUser -Name "Administrator" -Password $securePass
+          } else {
+              New-LocalUser -Name "Administrator" -Password $securePass -AccountNeverExpires
+          }
 
-          # Add the user to Administrator and Remote Desktop Users groups
-          Add-LocalGroupMember -Group "Administrators" -Member "Administrator"
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "Administrator"
+          # Ensure group memberships
+          if (-not (Get-LocalGroupMember -Group "Administrators" -Member "Administrator" -ErrorAction SilentlyContinue)) {
+              Add-LocalGroupMember -Group "Administrators" -Member "Administrator"
+          }
+          if (-not (Get-LocalGroupMember -Group "Remote Desktop Users" -Member "Administrator" -ErrorAction SilentlyContinue)) {
+              Add-LocalGroupMember -Group "Remote Desktop Users" -Member "Administrator"
+          }
 
           # Output the credentials to GitHub environment for later use
           echo "RDP_CREDS=User: Administrator | Password: $password" >> $env:GITHUB_ENV
 
           if (-not (Get-LocalUser -Name "Administrator")) {
-              Write-Error "User creation failed"
+              Write-Error "User creation or update failed"
               exit 1
           }
 
@@ -77,10 +71,10 @@ jobs:
 
       - name: Establish Tailscale Connection
         run: |
-          # Use the hardcoded Tailscale auth key and set a unique hostname
-          $authKey = "tskey-auth-kfnUjLEccw11CNTRL-x91QgPf9mHArcf6cqaKsHAHW2RnA9dzg"
+          # Get the Tailscale Auth Key from GitHub Secrets
+          $authKey = "${{ secrets.TAILSCALE_AUTH_KEY }}"
           
-          # Bring up Tailscale with the provided auth key and set a unique hostname
+          # Log in to Tailscale using the provided auth key and set a unique hostname
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=$authKey --hostname=gh-runner-$env:GITHUB_RUN_ID
 
           # Wait for Tailscale to assign an IP
