@@ -61,17 +61,43 @@ jobs:
 
       - name: Install VS Code Desktop
         run: |
-          $vscodeUrl = "https://update.code.visualstudio.com/latest/win32-x64-user/stable"
+          # Direct stable download URL for VS Code (64-bit)
+          $vscodeUrl = "https://update.code.visualstudio.com/latest/win32-x64/stable"
           $installerPath = "$env:TEMP\vscode-installer.exe"
 
-          # Download VS Code installer
+          # Download installer
           Invoke-WebRequest -Uri $vscodeUrl -OutFile $installerPath
 
-          # Install VS Code silently (user installer)
-          Start-Process -FilePath $installerPath -ArgumentList '/VERYSILENT','/MERGETASKS=!runcode' -Wait
+          # Install silently. If it's an MSI, use msiexec; otherwise use common InnoSetup/NSIS args.
+          if ($installerPath.ToLower().EndsWith(".msi")) {
+            Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+          } else {
+            Start-Process -FilePath $installerPath -ArgumentList "/VERYSILENT", "/NORESTART", "/MERGETASKS=!runcode" -Wait
+          }
 
-          # Clean up installer
-          Remove-Item $installerPath -Force
+          Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+
+          # Ensure 'code' is available; try common install locations if not on PATH
+          $codeCmd = Get-Command code -ErrorAction SilentlyContinue
+          if (-not $codeCmd) {
+            $candidates = @(
+              "$env:ProgramFiles\Microsoft VS Code\Code.exe",
+              "$env:LocalAppData\Programs\Microsoft VS Code\Code.exe"
+            )
+            $found = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+            if ($found) {
+              Write-Host "VS Code installed at: $found"
+              # Add folder to PATH for this session
+              $folder = Split-Path $found -Parent
+              $env:PATH = "$folder;$env:PATH"
+              Write-Host "Added VS Code to PATH for this session."
+            } else {
+              Write-Error "VS Code installation failed or 'code' not found."
+              exit 1
+            }
+          } else {
+            Write-Host "VS Code available as: $($codeCmd.Source)"
+          }
 
           Write-Host "VS Code installed successfully."
 
