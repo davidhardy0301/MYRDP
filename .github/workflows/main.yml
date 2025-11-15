@@ -62,6 +62,7 @@ jobs:
 
       - name: Install Tailscale
         run: |
+          # NOTE: Using direct URL and auth key as per your script
           $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
           $installerPath = "$env:TEMP\tailscale.msi"
           
@@ -71,9 +72,9 @@ jobs:
 
       - name: Establish Tailscale Connection
         run: |
-          # Get the Tailscale Auth Key from GitHub Secrets
-          $authKey = "${{ secrets.TAILSCALE_AUTH_KEY }}"
-          
+          # 👉 Using auth key directly in script (NOT secrets), as you requested
+          $authKey = "tskey-auth-knxcKhLJV821CNTRL-uW6tQ1Bezh1yzZyGFPhBi1hWKmP8A5AF"
+
           # Log in to Tailscale using the provided auth key and set a unique hostname
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=$authKey --hostname=gh-runner-$env:GITHUB_RUN_ID
 
@@ -105,6 +106,25 @@ jobs:
               exit 1
           }
           Write-Host "TCP connectivity successful!"
+
+      # ============================
+      # EXTRA SOFTWARE INSTALLATION
+      # ============================
+
+      - name: Install Python
+        run: |
+          Write-Host "Installing Python via winget..."
+          winget install -e --id Python.Python.3.12 -h
+
+      - name: Install VS Code
+        run: |
+          Write-Host "Installing Visual Studio Code via winget..."
+          winget install -e --id Microsoft.VisualStudioCode -h
+
+      # (Optional) You can add more, for example:
+      # - name: Install Google Chrome
+      #   run: |
+      #     winget install -e --id Google.Chrome -h
 
       - name: Maintain RDP Connection
         run: |
