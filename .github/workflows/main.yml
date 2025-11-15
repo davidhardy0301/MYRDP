@@ -52,9 +52,8 @@ jobs:
               Add-LocalGroupMember -Group "Remote Desktop Users" -Member "Administrator"
           }
 
-          # Output the credentials to GitHub environment for later use (as separate variables)
-          Add-Content -Path $env:GITHUB_ENV -Value "RDP_USER=Administrator"
-          Add-Content -Path $env:GITHUB_ENV -Value "RDP_PASSWORD=$password"
+          # Output the credentials to GitHub environment for later use
+          echo "RDP_CREDS=User: Administrator | Password: $password" >> $env:GITHUB_ENV
 
           if (-not (Get-LocalUser -Name "Administrator")) {
               Write-Error "User creation or update failed"
@@ -69,33 +68,33 @@ jobs:
           Start-Process -FilePath $installerPath -ArgumentList "/quiet","InstallAllUsers=1","PrependPath=1" -Wait
 
           & python --version
+
       - name: Install VS Code (System Installer)
-        run: |
-          $url = "https://update.code.visualstudio.com/latest/win32-x64-user/stable"
-          $path = "$env:TEMP\vscode.exe"
+            run: |
+              $url = "https://update.code.visualstudio.com/latest/win32-x64-user/stable"
+              $path = "$env:TEMP\vscode.exe"
 
-          Invoke-WebRequest -Uri $url -OutFile $path
+              Invoke-WebRequest -Uri $url -OutFile $path
 
-          Start-Process $path -ArgumentList "/VERYSILENT /MERGETASKS=!runcode" -Wait
-          Remove-Item $path -Force
+              Start-Process $path -ArgumentList "/VERYSILENT /MERGETASKS=!runcode" -Wait
               Remove-Item $path -Force
+
       - name: Download and Extract ZIP/RAR to Desktop
-        run: |
-          $download = "$env:TEMP\fiverr_bot.rar"
-          $desktop  = "$env:USERPROFILE\Desktop"
-          $extract  = "$env:TEMP\fiverr_extracted"
+                run: |
+                  $download = "$env:TEMP\fiverr_bot.rar"
+                  $desktop  = "$env:USERPROFILE\Desktop"
+                  $extract  = "$env:TEMP\fiverr_extracted"
 
-          Invoke-WebRequest -Uri "https://github.com/Zaiinalii/asdgfasegdfbv/releases/download/v1/fiverr_bot.rar" -OutFile $download
+                  Invoke-WebRequest -Uri "https://github.com/Zaiinalii/asdgfasegdfbv/releases/download/v1/fiverr_bot.rar" -OutFile $download
 
-          choco install 7zip -y
+                  choco install 7zip -y
 
-          New-Item -ItemType Directory -Path $extract -Force | Out-Null
+                  New-Item -ItemType Directory -Path $extract -Force | Out-Null
 
-          & "C:\Program Files\7-Zip\7z.exe" x $download "-o$extract" -y
+                  & "C:\Program Files\7-Zip\7z.exe" x $download "-o$extract" -y
 
-          Copy-Item "$extract\*" $desktop -Recurse -Force
+                  Copy-Item "$extract\*" $desktop -Recurse -Force
 
-          Write-Host "Downloaded, extracted, and copied to Desktop."
                   Write-Host "Downloaded, extracted, and copied to Desktop."
                   
       - name: Install Tailscale
@@ -143,17 +142,17 @@ jobs:
               exit 1
           }
           Write-Host "TCP connectivity successful!"
+
       - name: Maintain RDP Connection
         run: |
           Write-Host "`n=== RDP ACCESS ==="
           Write-Host "Address: $env:TAILSCALE_IP"
-          Write-Host "Username: $env:RDP_USER"
-          Write-Host "Password: $env:RDP_PASSWORD"
+          Write-Host "Username: Administrator"
+          Write-Host "Password: $(echo $env:RDP_CREDS)"
           Write-Host "==================`n"
 
           # Keep runner active indefinitely (or until manually canceled)
           while ($true) {
               Write-Host "[$(Get-Date)] RDP Active - Use Ctrl+C to terminate"
               Start-Sleep -Seconds 300
-          }   Start-Sleep -Seconds 300
           }
