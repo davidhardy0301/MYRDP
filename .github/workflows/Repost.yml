@@ -101,6 +101,58 @@ jobs:
 
           Write-Host "VS Code installed successfully."
 
+            - name: Install Private Internet Access (PIA) VPN
+        run: |
+          # Attempt installation via winget, then Chocolatey, then direct download as fallback.
+          $installed = $false
+
+          # 1) Try winget (common on Windows runners)
+          try {
+            Write-Host "Attempting winget install..."
+            winget install --id Private.InternetAccess.PrivateInternetAccess -e --silent --accept-package-agreements --accept-source-agreements
+            if ($LASTEXITCODE -eq 0) { $installed = $true }
+          } catch {
+            Write-Warning "winget install failed or not available: $_"
+          }
+
+          # 2) Try Chocolatey
+          if (-not $installed) {
+            try {
+              Write-Host "Attempting Chocolatey install..."
+              if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
+          Set-ExecutionPolicy Bypass -Scope Process -Force
+          iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+              }
+              choco install pia -y || choco install private-internet-access -y
+              if ($LASTEXITCODE -eq 0) { $installed = $true }
+            } catch {
+              Write-Warning "Chocolatey install failed: $_"
+            }
+          }
+
+          # 3) Fallback: direct download + silent install (best-effort; URL may change)
+          if (-not $installed) {
+            try {
+              Write-Host "Attempting direct download/install..."
+              $url = "https://static.privateinternetaccess.com/windows/pia_windows.exe"
+              $installer = "$env:TEMP\pia-installer.exe"
+              Invoke-WebRequest -Uri $url -OutFile $installer -UseBasicParsing -ErrorAction Stop
+              # Many PIA installers support /S or /verysilent; try common silent flags
+              Start-Process -FilePath $installer -ArgumentList "/S" -Wait -NoNewWindow
+              Remove-Item $installer -Force -ErrorAction SilentlyContinue
+              $installed = $true
+            } catch {
+              Write-Warning "Direct download/install failed: $_"
+            }
+          }
+
+          if (-not $installed) {
+            Write-Error "PIA installation failed by all methods."
+            exit 1
+          } else {
+            Write-Host "PIA installed successfully."
+          }
+
       - name: Download and Extract Fiverr_bot
         run: |
           # Paths
